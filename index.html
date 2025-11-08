@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <!-- Esta línea es clave para la optimización en celulares -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Póster de Se Busca</title>
+    <!-- Cargamos Tailwind CSS para un diseño moderno y responsivo -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Usamos la fuente Inter, que es limpia y moderna */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Aseguramos que el video de la cámara frontal se vea espejado, como un espejo real */
+        #video-feed, #photo-canvas {
+            transform: scaleX(-1);
+            object-fit: cover; /* Asegura que el video/foto llene el espacio asignado */
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex flex-col items-center justify-center p-4 overflow-hidden">
+
+    <div class="w-full max-w-md mx-auto">
+        
+        <!-- Contenedor principal del póster -->
+        <!-- Usamos la imagen que subiste como fondo -->
+        <!-- La relación de aspecto se basa en las dimensiones de un póster A3 (2480x3508) -->
+        <div id="poster-container" 
+             class="relative w-full bg-cover bg-center rounded-lg shadow-2xl"
+             style="background-image: url('https://i.imgur.com/nT1tuVB.png'); /* <-- 1. URL Actualizada */ aspect-ratio: 2480 / 3508;">
+
+            <!-- El video de la cámara se posicionará absolutamente dentro del póster -->
+            <!-- Los porcentajes (top, left, width, height) se ajustaron para calzar en el hueco negro -->
+            <video id="video-feed" 
+                   autoplay 
+                   playsinline 
+                   class="absolute rounded-sm"
+                   style="top: 22.2%; left: 14%; width: 72%; height: 45%;"></video>
+
+            <!-- El canvas para la foto capturada (inicialmente oculto) -->
+            <canvas id="photo-canvas" 
+                    class="absolute hidden rounded-sm"
+                    style="top: 22.2%; left: 14%; width: 72%; height: 45%;"></canvas>
+        </div>
+
+        <!-- Botones de control -->
+        <div id="controls" class="mt-6 flex flex-col gap-3">
+            
+            <!-- Mensaje de estado -->
+            <div id="message-box" class="text-center text-yellow-400 h-6"></div>
+
+            <button id="start-camera" class="w-full py-3 px-6 bg-green-600 text-white font-bold rounded-lg shadow-md hover:bg-green-700 transition-all">
+                1. Iniciar Cámara
+            </button>
+
+            <div class="grid grid-cols-2 gap-3">
+                <button id="take-photo" class="w-full py-3 px-6 bg-blue-600 text-white font-bold rounded-lg shadow-md hover:bg-blue-700 transition-all hidden">
+                    2. Tomar Foto
+                </button>
+                <button id="switch-camera" class="w-full py-3 px-6 bg-gray-600 text-white font-bold rounded-lg shadow-md hover:bg-gray-700 transition-all hidden">
+                    Girar Cámara
+                </button>
+            </div>
+
+            <button id="retake-photo" class="w-full py-3 px-6 bg-yellow-500 text-gray-900 font-bold rounded-lg shadow-md hover:bg-yellow-600 transition-all hidden">
+                Repetir Foto
+            </button>
+
+            <button id="download-photo" class="w-full py-3 px-6 bg-purple-600 text-white font-bold rounded-lg shadow-md hover:bg-purple-700 transition-all hidden">
+                3. Descargar Póster
+            </button>
+        </div>
+    </div>
+
+    <!-- Canvas oculto para componer la imagen final (póster + foto) -->
+    <canvas id="composite-canvas" class="hidden"></canvas>
+
+    <script>
+        // --- INICIO DEL SCRIPT COMPLETO ---
+        // Obtenemos todos los elementos del DOM que necesitamos
+        const videoFeed = document.getElementById('video-feed');
+        const photoCanvas = document.getElementById('photo-canvas');
+        const photoCtx = photoCanvas.getContext('2d');
+        const compositeCanvas = document.getElementById('composite-canvas');
+        const compositeCtx = compositeCanvas.getContext('2d');
+        
+        const startButton = document.getElementById('start-camera');
+        const takePhotoButton = document.getElementById('take-photo');
+        const retakeButton = document.getElementById('retake-photo');
+        const downloadButton = document.getElementById('download-photo');
+        const switchButton = document.getElementById('switch-camera');
+        const messageBox = document.getElementById('message-box');
+
+        let currentStream = null;
+        let currentFacingMode = 'user'; // 'user' para selfie, 'environment' para trasera
+
+        // --- 1. Iniciar la Cámara ---
+        async function startCamera(facingMode = 'user') {
+            showMessage('Iniciando cámara...');
+            // Detenemos cualquier stream anterior (al cambiar de cámara)
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+
+            try {
+                // Pedimos acceso al video, priorizando el 'facingMode' (frontal/trasera)
+                const constraints = {
+                    video: { 
+                        facingMode: { ideal: facingMode }
+                    }
+                };
+
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                currentStream = stream;
+                videoFeed.srcObject = stream;
+                
+                // Ajustamos el canvas de la foto para que tenga la misma resolución que el video
+                videoFeed.onloadedmetadata = () => {
+                    photoCanvas.width = videoFeed.videoWidth;
+                    photoCanvas.height = videoFeed.videoHeight;
+                    showMessage('¡Cámara lista!');
+                };
+                
+                // Actualizamos la UI
+                videoFeed.classList.remove('hidden');
+                photoCanvas.classList.add('hidden');
+                startButton.classList.add('hidden');
+                takePhotoButton.classList.remove('hidden');
+                switchButton.classList.remove('hidden');
+                retakeButton.classList.add('hidden');
+                downloadButton.classList.add('hidden');
+
+            } catch (err) {
+                console.error('Error al acceder a la cámara:', err);
+                // Fallback por si 'facingMode' falla (ej. en laptops)
+                if (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError') {
+                    try {
+                        const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                        currentStream = fallbackStream;
+                        videoFeed.srcObject = fallbackStream;
+                        videoFeed.onloadedmetadata = () => {
+                            photoCanvas.width = videoFeed.videoWidth;
+                            photoCanvas.height = videoFeed.videoHeight;
+                        };
+                    } catch (fallbackErr) {
+                         showMessage('Error: No se pudo acceder a la cámara.');
+                         console.error('Error de fallback:', fallbackErr);
+                    }
+                } else {
+                    showMessage('Error: Permiso de cámara denegado.');
+                }
+            }
+        }
+
+        // --- 2. Tomar la Foto ---
+        function takePhoto() {
+            showMessage('¡Foto capturada!');
+            
+            // Dibujamos el cuadro actual del video en el canvas
+            photoCtx.drawImage(videoFeed, 0, 0, photoCanvas.width, photoCanvas.height);
+
+            // Detenemos el stream de video para "congelar" la imagen
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+
+            // Actualizamos la UI
+            videoFeed.classList.add('hidden');
+            photoCanvas.classList.remove('hidden');
+            takePhotoButton.classList.add('hidden');
+            switchButton.classList.add('hidden');
+            retakeButton.classList.remove('hidden');
+            downloadButton.classList.remove('hidden');
+        }
+
+        // --- 3. Repetir la Foto ---
+        function retakePhoto() {
+            // Simplemente volvemos a iniciar la cámara
+            startCamera(currentFacingMode);
+        }
+
+        // --- 4. Cambiar de Cámara ---
+        function switchCamera() {
+            // Alternamos entre 'user' y 'environment'
+            currentFacingMode = (currentFacingMode === 'user')? 'environment' : 'user';
+            startCamera(currentFacingMode);
+        }
+        
+        // --- 5. Descargar el Póster Compuesto ---
+        function downloadPhoto() {
+            showMessage('Generando póster...');
+            
+            const posterImg = new Image();
+            
+            // Permitimos que el navegador cargue imágenes de otros dominios (como Imgur o Postimages)
+            posterImg.crossOrigin = "Anonymous"; 
+            
+            posterImg.src = 'https://i.imgur.com/nT1tuVB.png'; // <-- URL de Imgur Correcta
+            
+            posterImg.onload = () => {
+                // 1. Ajustamos el canvas de composición al tamaño real del póster
+                const posterWidth = posterImg.width;
+                const posterHeight = posterImg.height;
+                compositeCanvas.width = posterWidth;
+                compositeCanvas.height = posterHeight;
+
+                // 2. Dibujamos el póster como fondo
+                compositeCtx.drawImage(posterImg, 0, 0, posterWidth, posterHeight);
+
+                // 3. Calculamos dónde dibujar la foto capturada
+                // Estos porcentajes deben coincidir con los del CSS
+                const x = posterWidth * 0.14;  // 14% desde la izquierda
+                const y = posterHeight * 0.222; // 22.2% desde arriba
+                const width = posterWidth * 0.72; // 72% de ancho
+                const height = posterHeight * 0.45; // 45% de alto
+
+                // 4. Dibujamos la foto del canvas (con la inversión horizontal)
+                compositeCtx.save();
+                compositeCtx.translate(x + width, y); // Movemos el punto 0,0 a la esquina superior derecha del hueco
+                compositeCtx.scale(-1, 1); // Invertimos el canvas horizontalmente
+                compositeCtx.drawImage(photoCanvas, 0, 0, width, height); // Dibujamos la foto
+                compositeCtx.restore(); // Restauramos el estado del canvas
+
+                // 5. Creamos el enlace de descarga
+                const link = document.createElement('a');
+                link.download = 'mi-poster-se-busca.png';
+                link.href = compositeCanvas.toDataURL('image/png');
+                link.click();
+                
+                showMessage('¡Póster descargado!');
+            };
+            
+            posterImg.onerror = () => {
+                showMessage('Error: No se pudo cargar la imagen del póster.');
+                console.error("Error: Asegúrate de que la URL de la imagen sea correcta y accesible.");
+            }
+        }
+        
+        // --- Función de utilidad para mensajes ---
+        function showMessage(msg) {
+            messageBox.textContent = msg;
+            // Borramos el mensaje después de 3 segundos
+            setTimeout(() => {
+                if (messageBox.textContent === msg) {
+                    messageBox.textContent = '';
+                }
+            }, 3000);
+        }
+
+        // --- Asignamos los eventos a los botones ---
+        startButton.addEventListener('click', () => startCamera(currentFacingMode));
+        takePhotoButton.addEventListener('click', takePhoto);
+        retakeButton.addEventListener('click', retakePhoto);
+        switchButton.addEventListener('click', switchCamera);
+        downloadButton.addEventListener('click', downloadPhoto);
+
+    </script>
+</body>
+</html>
