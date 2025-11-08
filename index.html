@@ -24,24 +24,27 @@
     <div class="w-full max-w-md mx-auto">
         
         <!-- Contenedor principal del póster -->
-        <!-- Usamos la imagen que subiste como fondo -->
-        <!-- La relación de aspecto se basa en las dimensiones de un póster A3 (2480x3508) -->
+        <!-- Ya no usamos background-image. Añadimos un fondo gris mientras carga -->
         <div id="poster-container" 
-             class="relative w-full bg-cover bg-center rounded-lg shadow-2xl"
-             style="background-image: url('https://i.imgur.com/nT1tuVB.png'); /* <-- 1. URL Actualizada */ aspect-ratio: 2480 / 3508;">
+             class="relative w-full bg-gray-700 rounded-lg shadow-2xl"
+             style="aspect-ratio: 2480 / 3508;">
 
-            <!-- El video de la cámara se posicionará absolutamente dentro del póster -->
-            <!-- Los porcentajes (top, left, width, height) se ajustaron para calzar en el hueco negro -->
+            <!-- 1. El video de la cámara va al fondo (z-0) -->
+            <!-- Rellena todo el contenedor (w-full, h-full) y usa object-cover -->
             <video id="video-feed" 
                    autoplay 
                    playsinline 
-                   class="absolute rounded-sm"
-                   style="top: 22.2%; left: 14%; width: 72%; height: 45%;"></video>
+                   class="absolute top-0 left-0 w-full h-full object-cover rounded-lg z-0"></video>
 
-            <!-- El canvas para la foto capturada (inicialmente oculto) -->
+            <!-- 2. El canvas para la foto también va al fondo (z-0) -->
             <canvas id="photo-canvas" 
-                    class="absolute hidden rounded-sm"
-                    style="top: 22.2%; left: 14%; width: 72%; height: 45%;"></canvas>
+                    class="absolute hidden top-0 left-0 w-full h-full object-cover rounded-lg z-0"></canvas>
+            
+            <!-- 3. La imagen del póster va ENCIMA (z-10) -->
+            <!-- pointer-events-none evita que bloquee clics (aunque no hay nada debajo) -->
+            <img src="https://i.imgur.com/nT1tuVB.png" 
+                 alt="Póster Se Busca" 
+                 class="absolute top-0 left-0 w-full h-full pointer-events-none z-10">
         </div>
 
         <!-- Botones de control -->
@@ -205,24 +208,37 @@
                 compositeCanvas.width = posterWidth;
                 compositeCanvas.height = posterHeight;
 
-                // 2. Dibujamos el póster como fondo
+                // --- Lógica de "object-cover" para la foto ---
+                // Queremos que la foto (photoCanvas) llene el fondo (compositeCanvas)
+                const canvasAspect = posterWidth / posterHeight;
+                const photoAspect = photoCanvas.width / photoCanvas.height;
+                
+                let sx = 0, sy = 0, sWidth = photoCanvas.width, sHeight = photoCanvas.height;
+
+                if (photoAspect > canvasAspect) { 
+                    // La foto es MÁS ANCHA que el póster. Recortar lados.
+                    sWidth = photoCanvas.height * canvasAspect;
+                    sx = (photoCanvas.width - sWidth) / 2;
+                } else {
+                    // La foto es MÁS ALTA que el póster. Recortar arriba/abajo.
+                    sHeight = photoCanvas.width / canvasAspect;
+                    sy = (photoCanvas.height - sHeight) / 2;
+                }
+                // --- Fin lógica "object-cover" ---
+
+                // 2. Dibujamos la foto CAPTURADA (del photoCanvas) como fondo
+                // La dibujamos espejada para que coincida con la vista previa
+                compositeCtx.save();
+                compositeCtx.translate(posterWidth, 0); // Mover al borde derecho
+                compositeCtx.scale(-1, 1); // Espejar horizontalmente
+                // Dibujar la foto (ya recortada con sx, sy, sWidth, sHeight) para que llene el canvas
+                compositeCtx.drawImage(photoCanvas, sx, sy, sWidth, sHeight, 0, 0, posterWidth, posterHeight);
+                compositeCtx.restore(); // Quitar espejado
+
+                // 3. Dibujamos el PÓSTER (con su hueco transparente) ENCIMA de la foto
                 compositeCtx.drawImage(posterImg, 0, 0, posterWidth, posterHeight);
 
-                // 3. Calculamos dónde dibujar la foto capturada
-                // Estos porcentajes deben coincidir con los del CSS
-                const x = posterWidth * 0.14;  // 14% desde la izquierda
-                const y = posterHeight * 0.222; // 22.2% desde arriba
-                const width = posterWidth * 0.72; // 72% de ancho
-                const height = posterHeight * 0.45; // 45% de alto
-
-                // 4. Dibujamos la foto del canvas (con la inversión horizontal)
-                compositeCtx.save();
-                compositeCtx.translate(x + width, y); // Movemos el punto 0,0 a la esquina superior derecha del hueco
-                compositeCtx.scale(-1, 1); // Invertimos el canvas horizontalmente
-                compositeCtx.drawImage(photoCanvas, 0, 0, width, height); // Dibujamos la foto
-                compositeCtx.restore(); // Restauramos el estado del canvas
-
-                // 5. Creamos el enlace de descarga
+                // 4. Creamos el enlace de descarga
                 const link = document.createElement('a');
                 link.download = 'mi-poster-se-busca.png';
                 link.href = compositeCanvas.toDataURL('image/png');
